@@ -3,30 +3,32 @@ import logging
 import os
 
 from aiogram import Bot, Dispatcher
-from dotenv import load_dotenv
 
+from config import BOT_TOKEN, MODERATOR_ID
 from database import init_db
 from handlers import router
 
-load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-MODERATOR_ID = os.getenv("MODERATOR_ID")
-
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is not set")
-if not MODERATOR_ID:
-    raise RuntimeError("MODERATOR_ID is not set")
-
-logging.basicConfig(level=logging.INFO)
-
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
-dp.include_router(router)
+def _setup_logging() -> None:
+    os.makedirs("logs", exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=[
+            logging.FileHandler("logs/bot.log", encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
 
 
 async def main():
-    init_db()
+    _setup_logging()
+    init_db(int(MODERATOR_ID))
+
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+    dp.include_router(router)
+
     print("Бот успешно запущен!")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
