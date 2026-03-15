@@ -1,52 +1,89 @@
 import logging
-from aiogram import Router, types
-from aiogram.filters import Command, CommandStart
+import os
+from typing import Optional
+
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.filters import CommandStart
 from aiogram.types import Message
-from annotated_types import Not
-from ai_service import get_ai_response
+from dotenv import load_dotenv
+
+from ai_service import ask_ai
 from database import add_user
-from main import MODERATOR_ID, ask_ai, find_faq_answer
+
+load_dotenv()
+
+MODERATOR_ID = os.getenv("MODERATOR_ID")
+if not MODERATOR_ID:
+    raise RuntimeError("MODERATOR_ID is not set")
+MODERATOR_ID = int(MODERATOR_ID)
 
 router = Router()
+
+FAQ = {
+    "кто мы": "Мы создаем Telegram-ботов и автоматизацию бизнеса.",
+    "цены": "Стоимость зависит от проекта. Опишите задачу.",
+}
+
+
+def find_faq_answer(text: str) -> Optional[str]:
+    text = text.lower()
+    for question, answer in FAQ.items():
+        if question in text:
+            return answer
+    return None
 
 
 @router.message(CommandStart())
 async def start(message: Message):
-    # Сохраняем пользователя в базу данных
     add_user(message.from_user.id, message.from_user.username)
-
     await message.answer(
-        f"Привет, {message.from_user.first_name}! Я твой ИИ-ассистент. "
-        "Задай мне любой вопрос, и я постараюсь помочь."
+        f"Привет, {message.from_user.first_name}! "
+        "Я твой ИИ-ассистент. Задай мне любой вопрос, и я постараюсь помочь."
+    )
+
+
+@router.message(Command("help"))
+async def help_cmd(message: Message):
+    await message.answer(
+        "Доступные команды:\n"
+        "/start — начать диалог\n"
+        "/help — помощь\n"
+        "/faq — быстрые ответы\n"
+        "\n"
+        "Также можно просто написать вопрос сообщением."
+    )
+
+
+@router.message(Command("faq"))
+async def faq_cmd(message: Message):
+    items = [f"• {q}" for q in FAQ.keys()]
+    await message.answer(
+        "Частые вопросы:\n" + "\n".join(items) + "\n\nПросто напиши вопрос."
     )
 
 
 @router.message()
 async def handle_msg(message: Message):
     user_id = message.from_user.id
-    text = message.text.lower()
+    text = message.text or ""
 
-    # 1. Сначала ищем в быстром FAQ
     answer = find_faq_answer(text)
     if answer:
         await message.answer(answer)
         return
 
-    # 2. Если в FAQ нет, идем к нейросети
-    await Not.send_chat_action(message.chat.id, "typing")
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    ai_answer = await ask_ai(text)
 
-    # Пытаемся получить ответ от ИИ
-    ai_answer = await ask_ai(message.text)
-
-    # ВАЖНО: Проверяем, что ИИ хоть что-то вернул
-    if ai_answer and len(ai_answer.strip()) > 0:
+    if ai_answer and ai_answer.strip():
         await message.answer(ai_answer)
-    else:
-        # Только если ИИ реально выдал None или пустую строку, идем к менеджеру
-        logging.warning(
-            f"ИИ не смог ответить пользователю {user_id}. Текст: {message.text}"
-        )
-        await message.answer("Секундочку, передаю ваш вопрос специалисту...")
-        await Not.send_message(
-            MODERATOR_ID, f" ИИ не справился!\nID: {user_id}\nТекст: {message.text}"
-        )
+        return
+
+    logging.warning(
+        "AI did not return an answer for user_id=%s. Text=%s", user_id, text
+    )
+    await message.answer("Секундочку, передам ваш вопрос специалисту...")
+    await message.bot.send_message(
+        MODERATOR_ID, f"Нужна помощь!\nID: {user_id}\nТекст: {text}"
+    )

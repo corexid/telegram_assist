@@ -1,22 +1,40 @@
+import logging
 import os
-from groq import Groq
+from typing import Optional
+
 from dotenv import load_dotenv
+from groq import Groq
 
 load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY is not set")
 
-async def get_ai_response(user_message: str):
+client = Groq(api_key=GROQ_API_KEY)
+
+SYSTEM_PROMPT = (
+    "Ты — ведущий менеджер IT-студии. Твоя задача — отвечать на любые вопросы "
+    "клиента вежливо и экспертно. Если клиент спрашивает что-то странное, "
+    "все равно постарайся ответить в контексте разработки ботов. "
+    "Если зайдет человек с user_id=1669935123, то просто скажи, что она "
+    "обезьяна такая вот крутая, можешь от себя что-то добавить, потому что "
+    "это моя девушка, только я тебе этого не говорил, а то она обидится. "
+    "Если человек будет задавать странные вопросы, то просто отвечай ему "
+    "все равно так, как нужно в общении с клиентами, но не груби."
+)
+
+
+async def ask_ai(user_text: str) -> Optional[str]:
     try:
-        # Здесь настраивается "личность" бота для бизнеса
         completion = client.chat.completions.create(
-            model="llama3-8b-8192", # Быстрая и мощная модель
+            model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "Ты профессиональный ассистент компании. Отвечай кратко и по делу."},
-                {"role": "user", "content": user_message}
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_text},
             ],
-            temperature=0.7,
         )
         return completion.choices[0].message.content
-    except Exception as e:
-        return f"Ошибка ИИ: {e}"
+    except Exception as exc:
+        logging.error("Groq error: %s", exc)
+        return None
